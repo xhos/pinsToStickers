@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  itanoru-bot:
+    build: .
+    container_name: itanoru-bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - DB_PATH=/app/data/bot.db
+      - TEMP_DIR=/app/temp
+      - LOG_LEVEL=info
+      - SYNC_INTERVAL=@hourly
+      - MAX_CONCURRENT_SYNCS=3
+      - GALLERY_DL_RATE_LIMIT=1.0-2.0
+      - MAX_STICKERS=120
+      - TZ=UTC
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "pgrep", "itanoru-bot"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - itanoru-network
+
+networks:
+  itanoru-network:
+    driver: bridge
+
+volumes:
+  data:
+    driver: local
+  logs:
+    driver: local
+  temp:
+    driver: local

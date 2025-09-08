@@ -1,36 +1,58 @@
-FROM rust:slim
+FROM golang:1.21-alpine AS builder
 
-LABEL org.opencontainers.image.source="https://github.com/xhos/Itanoru"
+RUN apk add --no-cache git gcc musl-dev sqlite-dev
 
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    curl \
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN go build -o itanoru-bot cmd/bot/main.go
+
+FROM alpine:latest
+
+RUN apk add --no-cache \
     python3 \
-    python3-full \
-    python3-pip \
-    python3-venv \
-    && rm -rf /var/lib/apt/lists/*
+    py3-pip \
+    ffmpeg \
+    imagemagick \
+    ca-certificates \
+    tzdata \
+    sqlite
 
-# Create and activate virtual environment for gallery-dl
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Install gallery-dl in virtual environment
+# Install gallery-dl
 RUN pip3 install --no-cache-dir gallery-dl
 
-# Set working directory
 WORKDIR /app
 
-# Create data directory with proper permissions
-RUN mkdir -p /app/data && chmod 777 /app/data
+COPY --from=builder /app/itanoru-bot .
+COPY config/gallery-dl.conf /etc/gallery-dl.conf
 
-# Copy the Rust project files
-COPY . .
+# Create directories
+RUN mkdir -p /app/data /app/temp /app/logs
 
-# Build the application
-RUN cargo build --release
+# Create non-root user
+RUN addgroup -g 1000 appgroup && \
+    adduser -u 1000 -G appgroup -s /bin/sh -D appuser && \
+    chown -R appuser:appgroup /app
 
-# Run the boto
-CMD ["./target/release/itanoru"]
+USER appuser
+
+VOLUME ["/app/data", "/app/logs"]
+
+ENV TZ=UTC
+ENV BOT_TOKEN=""
+ENV DB_PATH="/app/data/bot.db"
+ENV TEMP_DIR="/app/temp"
+ENV LOG_LEVEL="info"
+ENV SYNC_INTERVAL="@hourly"
+ENV MAX_CONCURRENT_SYNCS="3"
+ENV GALLERY_DL_RATE_LIMIT="1.0-2.0"
+ENV MAX_STICKERS="120"
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD pgrep itanoru-bot || exit 1
+
+CMD ["./itanoru-bot"]
